@@ -2,7 +2,7 @@
 
 ## Description
 
-This backend project provides the API for QuickBites, a food delivery application. It handles user authentication, data management, image processing, payment integration, and more.
+This backend project serves as the API for QuickBites, a service that facilitates the delivery of authentic, home-cooked meals from local providers. It includes user authentication, order management, image support for home-style cuisine, payment processing, and core data operations.
 
 ## Technologies Used
 
