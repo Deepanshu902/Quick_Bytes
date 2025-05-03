@@ -22,8 +22,11 @@ This backend project serves as the API for QuickBites, a service that facilitate
 * **Crypto:** Encryption and decryption.
 * **Node Geocoder:** Geocoding services.
 * **Razorpay:** Payment gateway integration.
+* **Docker:** Containerization.
 
 ## Installation
+
+### Standard Setup
 
 1.  **Clone the repository:**
 
@@ -75,6 +78,37 @@ This backend project serves as the API for QuickBites, a service that facilitate
 
     * This will start the server using `nodemon` for automatic restarts on file changes.
 
+### Docker Setup
+
+1. **Clone the repository:**
+
+   ```bash
+   git clone <repository_url>
+   cd backend
+   ```
+
+2. **Create a `.env` file:**
+   * Follow the environment variables guide in the standard setup section above
+   * For Docker deployment, ensure your MongoDB URI points to either an external MongoDB instance or use Docker Compose for a complete setup
+
+3. **Build the Docker image:**
+   ```bash
+   docker build -t quickbites-backend .
+   ```
+
+4. **Run the container:**
+   ```bash
+   docker run -p 8000:8000 -d --name quickbites-container --env-file ./.env quickbites-backend
+   ```
+   
+5. **The API will be available at http://localhost:8000**
+
+6. **Useful Docker commands:**
+   * View running containers: `docker ps`
+   * Stop the container: `docker stop quickbites-container`
+   * View logs: `docker logs quickbites-container`
+   * Remove the container: `docker rm quickbites-container`
+
 ## Scripts
 
 * `npm run dev`: Starts the development server with `nodemon`.
@@ -106,3 +140,5 @@ This backend project serves as the API for QuickBites, a service that facilitate
 * Ensure that your `.env` file is properly configured with secure values.
 * Securely manage your API keys and secrets.
 * Thoroughly test your API endpoints.
+* When using Docker, make sure your MongoDB connection string is accessible from within the container.
+* The `.env` file is excluded from the Docker image for security reasons - it must be provided at runtime via the `--env-file` option.
