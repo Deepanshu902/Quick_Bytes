@@ -29,12 +29,10 @@ export const verifyJWT = asyncHandler(async (req, res, next) => {
 
 export const authorizeRoles = (...roles) => {
     return (req, res, next) => {
-        console.log("req.user:", req.user);
-        console.log("req.user.role:", req.user.role);
-        if (!req.user || req.user.role === undefined) { // Check for undefined role very edge case
+        if (!req.user?.role) {
             throw new ApiError(403, "You do not have permission to access this resource");
         }
-        if (req.user && req.user.role && typeof req.user.role.toString() === "string" && !roles.includes(req.user.role.toString().toLowerCase())) { // changed allowedRoles to roles.
+        if (!roles.includes(req.user.role)) {
             throw new ApiError(403, "You do not have permission to access this resource");
         }
         next();

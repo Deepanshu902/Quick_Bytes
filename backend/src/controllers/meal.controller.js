@@ -3,7 +3,7 @@ import { ApiError } from "../utils/ApiError.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
 import { Meal } from "../models/meal.model.js";
 import geocoder from "../utils/geocoder.js";
-import { uploadOnCloudinary } from "../utils/cloudinary.js"; // Import uploadOnCloudinary
+import { uploadOnCloudinary } from "../utils/cloudinary.js";
 
 const createMeal = asyncHandler(async (req, res) => {
     const { name, description, price, category, address } = req.body;
@@ -45,15 +45,19 @@ const createMeal = asyncHandler(async (req, res) => {
 });
 
 const getAllMeals = asyncHandler(async (req, res) => {
-    const meals = await Meal.find();
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.min(50, Math.max(1, parseInt(req.query.limit) || 20));
+    const skip = (page - 1) * limit;
 
-    if (!meals) {
-        throw new ApiError(404, "Meals not found");
-    }
+    const [meals, total] = await Promise.all([
+        Meal.find().skip(skip).limit(limit),
+        Meal.countDocuments(),
+    ]);
 
-    return res
-        .status(200)
-        .json(new ApiResponse(200, meals, "Meals fetched successfully"));
+    return res.status(200).json(new ApiResponse(200, {
+        meals,
+        pagination: { total, page, limit, pages: Math.ceil(total / limit) },
+    }, "Meals fetched successfully"));
 });
 
 const getMealById = asyncHandler(async (req, res) => {
@@ -71,34 +75,47 @@ const getMealById = asyncHandler(async (req, res) => {
 const updateMeal = asyncHandler(async (req, res) => {
     const { name, description, price, category, address } = req.body;
 
-    let locationCoordinates;
-    if (address) {
-        const geo = await geocoder.geocode(address);
-        if (!geo || geo.length === 0) {
-            throw new ApiError(400, "Invalid address");
-        }
-        locationCoordinates = [geo[0].longitude, geo[0].latitude];
+    // Ownership check — only the chef who created this meal can update it
+    const existingMeal = await Meal.findById(req.params.mealId);
+    if (!existingMeal) {
+        throw new ApiError(404, "Meal not found");
+    }
+    if (existingMeal.chefId.toString() !== req.user._id.toString()) {
+        throw new ApiError(403, "You are not authorized to update this meal");
     }
 
-    let imageUrl = null;
+    let locationCoordinates;
+    if (address) {
+        try {
+            const geo = await geocoder.geocode(address);
+            if (geo && geo.length > 0) {
+                locationCoordinates = [geo[0].longitude, geo[0].latitude];
+            }
+        } catch (geoError) {
+            console.error("Geocoder error:", geoError.message);
+        }
+    }
+
+    let imageUrl;
     if (req.file) {
         const result = await uploadOnCloudinary(req.file.buffer);
         imageUrl = result?.secure_url;
     }
 
+    // Only update whitelisted fields — never spread req.body directly
+    const updateData = {};
+    if (name) updateData.name = name;
+    if (description) updateData.description = description;
+    if (price) updateData.price = price;
+    if (category) updateData.category = category;
+    if (locationCoordinates) updateData.locationCoordinates = locationCoordinates;
+    if (imageUrl) updateData.imageUrl = imageUrl;
+
     const meal = await Meal.findByIdAndUpdate(
         req.params.mealId,
-        {
-            ...req.body,
-            ...(locationCoordinates && { locationCoordinates }),
-            ...(imageUrl && { imageUrl }),
-        },
+        updateData,
         { new: true }
     );
-
-    if (!meal) {
-        throw new ApiError(404, "Meal not found");
-    }
 
     return res
         .status(200)
@@ -106,11 +123,16 @@ const updateMeal = asyncHandler(async (req, res) => {
 });
 
 const deleteMeal = asyncHandler(async (req, res) => {
-    const meal = await Meal.findByIdAndDelete(req.params.mealId);
-
+    // Ownership check — only the chef who created this meal can delete it
+    const meal = await Meal.findById(req.params.mealId);
     if (!meal) {
         throw new ApiError(404, "Meal not found");
     }
+    if (meal.chefId.toString() !== req.user._id.toString()) {
+        throw new ApiError(403, "You are not authorized to delete this meal");
+    }
+
+    await meal.deleteOne();
 
     return res
         .status(200)
@@ -120,10 +142,7 @@ const deleteMeal = asyncHandler(async (req, res) => {
 const getMealsByChefId = asyncHandler(async (req, res) => {
     const meals = await Meal.find({ chefId: req.user._id });
 
-    if (!meals) {
-        throw new ApiError(404, "Meals not found");
-    }
-
+    // .find() returns [] not null, so no 404 needed — just return the empty array
     return res
         .status(200)
         .json(new ApiResponse(200, meals, "Meals fetched successfully"));

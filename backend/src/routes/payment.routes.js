@@ -11,7 +11,7 @@ const router = Router();
 
 router.route("/create-order").post(verifyJWT, createPayment);
 router.route("/verify-payment").post(verifyJWT, verifyPayment);
+router.route("/order/:orderId").get(verifyJWT, getPaymentsForOrder); // must be before /:paymentId
 router.route("/:paymentId").get(verifyJWT, getPaymentById);
-router.route("/order/:orderId").get(verifyJWT, getPaymentsForOrder);
 
 export default router;

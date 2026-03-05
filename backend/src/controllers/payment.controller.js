@@ -4,6 +4,7 @@ import { ApiResponse } from "../utils/ApiResponse.js";
 import { Payment } from "../models/payment.model.js";
 import { Order } from "../models/order.model.js";
 import razorpay from "../utils/razorpay.js";
+import crypto from "crypto";
 
 const createPayment = asyncHandler(async (req, res) => {
     const { orderId } = req.body;
@@ -44,10 +45,12 @@ const verifyPayment = asyncHandler(async (req, res) => {
         throw new ApiError(404, "Order not found");
     }
 
-    const expectedSignature = razorpay.utils.generateSignature({
-        order_id: razorpay_order_id,
-        payment_id: razorpay_payment_id,
-    }, process.env.RAZORPAY_KEY_SECRET);
+ 
+    const body = razorpay_order_id + "|" + razorpay_payment_id;
+    const expectedSignature = crypto
+        .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
+        .update(body)
+        .digest("hex");
 
     if (expectedSignature !== razorpay_signature) {
         throw new ApiError(400, "Payment signature verification failed");
@@ -83,10 +86,7 @@ const getPaymentById = asyncHandler(async (req, res) => {
 const getPaymentsForOrder = asyncHandler(async (req, res) => {
     const payments = await Payment.find({ orderId: req.params.orderId }).populate("orderId");
 
-    if (!payments) {
-        throw new ApiError(404, "Payments not found");
-    }
-
+    
     return res.status(200).json(new ApiResponse(200, payments, "Payments fetched successfully"));
 });
 

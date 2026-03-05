@@ -4,22 +4,38 @@ import { ApiResponse } from "../utils/ApiResponse.js";
 import { Cart } from "../models/cart.model.js";
 import { Meal } from "../models/meal.model.js";
 
+// Helper: recalculate totalAmount correctly across all items in the cart
+const recalculateTotal = async (cartItems) => {
+    const mealIds = cartItems.map((item) => item.mealId);
+    const meals = await Meal.find({ _id: { $in: mealIds } });
+    const mealPriceMap = {};
+    meals.forEach((meal) => { mealPriceMap[meal._id.toString()] = meal.price; });
+
+    return cartItems.reduce((total, item) => {
+        const price = mealPriceMap[item.mealId.toString()] || 0;
+        return total + item.quantity * price;
+    }, 0);
+};
+
 const addToCart = asyncHandler(async (req, res) => {
     const { mealId, quantity } = req.body;
     const userId = req.user._id;
 
-    console.log("Meal Id :",mealId)
-    console.log("quantity : ",quantity);
-    
-
-    if (!mealId || !quantity) {
+    if (!mealId || quantity === undefined) {
         throw new ApiError(400, "Meal ID and quantity are required");
     }
 
+    if (!Number.isInteger(quantity) || quantity < 1) {
+        throw new ApiError(400, "Quantity must be a positive integer");
+    }
 
     const meal = await Meal.findById(mealId);
     if (!meal) {
         throw new ApiError(404, "Meal not found");
+    }
+
+    if (!meal.availability) {
+        throw new ApiError(400, "This meal is currently unavailable");
     }
 
     let cart = await Cart.findOne({ userId });
@@ -35,9 +51,7 @@ const addToCart = asyncHandler(async (req, res) => {
         cart.items.push({ mealId, quantity });
     }
 
-    cart.totalAmount = cart.items.reduce((total, item) => {
-        return total + item.quantity * meal.price;
-    }, 0);
+    cart.totalAmount = await recalculateTotal(cart.items);
 
     await cart.save();
 
@@ -49,8 +63,12 @@ const updateCartItemQuantity = asyncHandler(async (req, res) => {
     const { mealId } = req.params;
     const userId = req.user._id;
 
-    if (!quantity) {
+    if (quantity === undefined) {
         throw new ApiError(400, "Quantity is required");
+    }
+
+    if (!Number.isInteger(quantity) || quantity < 1) {
+        throw new ApiError(400, "Quantity must be a positive integer");
     }
 
     const cart = await Cart.findOne({ userId });
@@ -60,16 +78,13 @@ const updateCartItemQuantity = asyncHandler(async (req, res) => {
 
     const itemIndex = cart.items.findIndex((item) => item.mealId.toString() === mealId);
 
-    if (itemIndex > -1) {
-        cart.items[itemIndex].quantity = quantity;
-    } else {
+    if (itemIndex === -1) {
         throw new ApiError(404, "Item not found in cart");
     }
 
-    const meal = await Meal.findById(mealId);
-    cart.totalAmount = cart.items.reduce((total, item) => {
-        return total + item.quantity * meal.price;
-    }, 0);
+    cart.items[itemIndex].quantity = quantity;
+
+    cart.totalAmount = await recalculateTotal(cart.items);
 
     await cart.save();
 
@@ -87,10 +102,8 @@ const removeFromCart = asyncHandler(async (req, res) => {
 
     cart.items = cart.items.filter((item) => item.mealId.toString() !== mealId);
 
-    const meal = await Meal.findById(mealId);
-    cart.totalAmount = cart.items.reduce((total, item) => {
-        return total + item.quantity * meal.price;
-    }, 0);
+    // Recalculate from remaining items — no longer fetches the removed meal
+    cart.totalAmount = await recalculateTotal(cart.items);
 
     await cart.save();
 

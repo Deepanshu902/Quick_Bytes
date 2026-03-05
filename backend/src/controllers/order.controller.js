@@ -18,6 +18,9 @@ const createOrder = asyncHandler(async (req, res) => {
         if (!meal) {
             throw new ApiError(404, `Meal with ID ${item.mealId} not found`);
         }
+        if (!meal.availability) {
+            throw new ApiError(400, `"${meal.name}" is currently unavailable`);
+        }
         return { mealId: item.mealId, quantity: item.quantity };
     }));
 
@@ -33,7 +36,7 @@ const createOrder = asyncHandler(async (req, res) => {
         throw new ApiError(500, "Failed to create order");
     }
 
-    await Cart.findOneAndDelete({ userId }); // Clear the cart
+    await Cart.findOneAndDelete({ userId });
 
     return res.status(201).json(new ApiResponse(201, order, "Order created successfully"));
 });
@@ -43,6 +46,11 @@ const getOrderById = asyncHandler(async (req, res) => {
 
     if (!order) {
         throw new ApiError(404, "Order not found");
+    }
+
+    // Users can only see their own orders; chefs can see any order with their meals
+    if (order.userId.toString() !== req.user._id.toString() && req.user.role !== "chef") {
+        throw new ApiError(403, "You are not authorized to view this order");
     }
 
     return res.status(200).json(new ApiResponse(200, order, "Order fetched successfully"));
@@ -71,10 +79,7 @@ const updateOrderStatus = asyncHandler(async (req, res) => {
 const getOrdersForUser = asyncHandler(async (req, res) => {
     const orders = await Order.find({ userId: req.user._id }).populate("items.mealId");
 
-    if (!orders) {
-        throw new ApiError(404, "Orders not found");
-    }
-
+    // .find() always returns an array, never null — return empty array gracefully
     return res.status(200).json(new ApiResponse(200, orders, "Orders fetched successfully"));
 });
 
@@ -82,11 +87,9 @@ const getOrdersForChef = asyncHandler(async (req, res) => {
     const meals = await Meal.find({ chefId: req.user._id });
     const mealIds = meals.map(meal => meal._id);
 
-    const orders = await Order.find({ "items.mealId": { $in: mealIds } }).populate("items.mealId").populate("userId");
-
-    if (!orders) {
-        throw new ApiError(404, "Orders not found");
-    }
+    const orders = await Order.find({ "items.mealId": { $in: mealIds } })
+        .populate("items.mealId")
+        .populate("userId", "username"); // Only expose username — not encrypted PII
 
     return res.status(200).json(new ApiResponse(200, orders, "Orders fetched successfully"));
 });

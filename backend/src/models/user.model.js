@@ -22,7 +22,11 @@ const userSchema = new mongoose.Schema({
     },
     role:{
         type:String,
-        enum:["user","chef"]
+        enum:["user","chef"],
+        default: "user",
+    },
+    refreshToken:{
+        type:String,
     },
     profile:{
         address:{
@@ -55,7 +59,7 @@ userSchema.methods.generateAccessToken = function(){
          {
              _id: this._id,
              email:this.email,
-             name : this.name,
+             username: this.username,
              role: this.role
          },
          process.env.ACCESS_TOKEN_SECRET,

@@ -1,9 +1,9 @@
-// user.controller.js
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/ApiError.js";
 import { User } from "../models/user.model.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
 import { encrypt,decrypt } from "../utils/encryption.js";
+import jwt from "jsonwebtoken";
 
 const generateAccessAndRefreshTokens = async (userId) => {
     try {
@@ -16,7 +16,7 @@ const generateAccessAndRefreshTokens = async (userId) => {
 
         return { refreshToken, accessToken, role: user.role };
     } catch (error) {
-        throw new ApiError(501, "Something went wrong while generating refresh and access token ");
+        throw new ApiError(500, "Something went wrong while generating refresh and access token ");
     }
 };
 
@@ -30,10 +30,11 @@ const registerUser = asyncHandler(async (req, res) => {
     const { username, email, password, address, phoneNumber, locationCoordinates,role } = req.body;
 
     if (!username || !email || !password || !address || !phoneNumber || !locationCoordinates) {
-        throw new ApiError(401, "Username, email, password, address, phone number, and location coordinates are required");
+        throw new ApiError(400, "Username, email, password, address, phone number, and location coordinates are required");
     }
 
-    const existedUser = await User.findOne({ email });
+    const encryptedEmail = encrypt(email);
+    const existedUser = await User.findOne({ email: encryptedEmail });
 
     if (existedUser) {
         throw new ApiError(409, "Already Exist");
@@ -41,7 +42,7 @@ const registerUser = asyncHandler(async (req, res) => {
 
     const user = await User.create({
         username,
-        email : encrypt(email),
+        email: encryptedEmail,
         password,
         role: role || "user",
         profile: {
@@ -65,20 +66,20 @@ const registerUser = asyncHandler(async (req, res) => {
     createdUser.profile.address = decrypt(createdUser.profile.address);
     createdUser.profile.phoneNumber = decrypt(createdUser.profile.phoneNumber);
 
-    return res.status(201).json(new ApiResponse(200, createdUser, "User Registered"));
+    return res.status(201).json(new ApiResponse(201, createdUser, "User Registered"));
 });
 
 const loginUser = asyncHandler(async (req, res) => {
     const { email, password } = req.body;
 
     if (!email || !password) {
-        throw new ApiError(401, "Email and Password is required");
+        throw new ApiError(400, "Email and Password is required");
     }
 
-    const user = await User.findOne({ email });
+    const user = await User.findOne({ email: encrypt(email) });
 
     if (!user) {
-        throw new ApiError(500, "No user exist");
+        throw new ApiError(404, "No user found with this email");
     }
 
     const correctPassword = await user.isPasswordCorrect(password);
@@ -99,15 +100,15 @@ const loginUser = asyncHandler(async (req, res) => {
         .status(200)
         .cookie("refreshToken", refreshToken, { ...options, role })
         .cookie("accessToken", accessToken, { ...options, role })
-        .json(new ApiResponse(200, { ...loggedInUser.toObject(), role }, "User Logged in successfully"));
+        .json(new ApiResponse(200, { ...loggedInUser.toObject(), role, accessToken, refreshToken }, "User Logged in successfully"));
 });
 
 const logoutUser = asyncHandler(async (req, res) => {
     await User.findByIdAndUpdate(
         req.user._id,
         {
-            $set: {
-                refreshToken: undefined,
+            $unset: {
+                refreshToken: 1,
             },
         },
         {
@@ -126,15 +127,15 @@ const updateAccountDetails = asyncHandler(async (req, res) => {
     const { username, email, address, phoneNumber, locationCoordinates } = req.body;
 
     if (!username && !email && !address && !phoneNumber && !locationCoordinates) {
-        throw new ApiError(401, "At least one field is required");
+        throw new ApiError(400, "At least one field is required");
     }
 
     const updateFields = {
         username,
         email:email ? encrypt(email) : undefined,
         profile: {
-            address: address ? encrypt(address) : undefined, // Encrypt if provided
-            phoneNumber: phoneNumber ? encrypt(phoneNumber) : undefined, // Encrypt if provided
+            address: address ? encrypt(address) : undefined,
+            phoneNumber: phoneNumber ? encrypt(phoneNumber) : undefined,
             locationCoordinates:locationCoordinates
         },
     };
@@ -144,7 +145,7 @@ const updateAccountDetails = asyncHandler(async (req, res) => {
             delete updateFields[key];
         } else if (key === "profile") {
             Object.keys(updateFields.profile).forEach((profileKey) => {
-                if (updateFields.profile[profileencryptKey] === undefined) {
+                if (updateFields.profile[profileKey] === undefined) {
                     delete updateFields.profile[profileKey];
                 }
             });
@@ -185,7 +186,7 @@ const changeCurrentPassword = asyncHandler(async (req, res) => {
     const { oldpassword, newpassword } = req.body;
 
     if (!oldpassword || !newpassword) {
-        throw new ApiError(401, "Old and new password is required");
+        throw new ApiError(400, "Old and new password is required");
     }
 
     const user = await User.findById(req.user._id);
@@ -201,6 +202,34 @@ const changeCurrentPassword = asyncHandler(async (req, res) => {
     return res.status(200).json(new ApiResponse(200, {}, "Password changed Successfully"));
 });
 
+const refreshAccessToken = asyncHandler(async (req, res) => {
+    const incomingRefreshToken = req.cookies?.refreshToken || req.body?.refreshToken;
+
+    if (!incomingRefreshToken) {
+        throw new ApiError(401, "Refresh token is required");
+    }
+
+    const decodedToken = jwt.verify(incomingRefreshToken, process.env.REFRESH_TOKEN_SECRET);
+
+    const user = await User.findById(decodedToken?._id);
+
+    if (!user) {
+        throw new ApiError(401, "Invalid refresh token");
+    }
+
+    if (incomingRefreshToken !== user.refreshToken) {
+        throw new ApiError(401, "Refresh token is expired or already used");
+    }
+
+    const { accessToken, refreshToken: newRefreshToken } = await generateAccessAndRefreshTokens(user._id);
+
+    return res
+        .status(200)
+        .cookie("accessToken", accessToken, options)
+        .cookie("refreshToken", newRefreshToken, options)
+        .json(new ApiResponse(200, { accessToken }, "Access token refreshed"));
+});
+
 export {
     registerUser,
     loginUser,
@@ -208,4 +237,5 @@ export {
     updateAccountDetails,
     getCurrentUser,
     changeCurrentPassword,
+    refreshAccessToken,
 };
